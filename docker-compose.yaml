@@ -1,0 +1,130 @@
+x-airflow-common:
+  &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME}
+  env_file:
+    - .env
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: ${AIRFLOW__CORE__EXECUTOR}
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: ${AIRFLOW__CORE__SQL_ALCHEMY_CONN}
+    AIRFLOW__CELERY__RESULT_BACKEND: ${AIRFLOW__CELERY__RESULT_BACKEND}
+    AIRFLOW__CELERY__BROKER_URL: ${AIRFLOW__CELERY__BROKER_URL}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES}
+    AIRFLOW__CORE__SQL_ENGINE_ARGS: '{pool_timeout: 10, max_overflow: 10}'
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 20
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 20
+    AIRFLOW__SMTP__SMTP_STARTTLS: ${AIRFLOW__SMTP__SMTP_STARTTLS}
+    AIRFLOW__SMTP__SMTP_SSL: ${AIRFLOW__SMTP__SMTP_SSL}
+    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
+    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
+    AIRFLOW__SMTP__SMTP_PORT: ${AIRFLOW__SMTP__SMTP_PORT}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_USER}
+
+    EMAIL_RECIPIENT: ${EMAIL_RECIPIENT}
+    AIRFLOW_ENV: ${AIRFLOW_ENV}
+  volumes:
+    - ./airflow/dags/:/opt/airflow/dags
+    - ./airflow/plugins/:/opt/airflow/plugins
+    - ./airflow/data/:/opt/airflow/data
+    - .logs:/opt/airflow/logs
+    - ./airflow_config/airflow.cfg:/opt/airflow/airflow.cfg
+
+  user: "${AIRFLOW_UID}:0"
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+services:
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    build:
+      context: .
+      dockerfile: Dockerfile
+    mem_limit: 6g
+    env_file:
+      - .env
+    ports:
+      - 8080:8080
+    environment:
+      <<: *airflow-common-env
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    restart: always
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${AIRFLOW__CORE__SQL_ALCHEMY_CONN_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW__CORE__SQL_ALCHEMY_CONN_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW__CORE__SQL_ALCHEMY_CONN_DB}
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  airflow-init:
+    <<: *airflow-common
+    command: "airflow db init && airflow db upgrade"
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  redis:
+    image: redis:latest
+    ports:
+      - 6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    restart: always
+    command: scheduler
+
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker
+    restart: always
+
+  flower:
+    <<: *airflow-common
+    command: celery flower
+    ports:
+      - 5555:5555
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+volumes:
+  postgres-db-volume:
