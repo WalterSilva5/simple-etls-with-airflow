@@ -84,3 +84,5 @@ data/*
 .pytest_cache
 
 deps/*
+
+.logs/*
