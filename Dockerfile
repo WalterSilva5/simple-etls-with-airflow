@@ -21,6 +21,7 @@ RUN apt-get install -y gcc make apt-transport-https ca-certificates build-essent
 
 ENV PYTHONPATH "${PYTHONPATH}:/opt/airflow/plugins"
 ENV PYTHONPATH "${PYTHONPATH}:/opt/airflow/data"
+ENV PYTHONPATH "${PYTHONPATH}:/opt/airflow"
 
 USER airflow
 # RUN chown airflow  /opt/airflow/airflow.cfg
